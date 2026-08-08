@@ -11,6 +11,7 @@ RUN apk add --no-cache \
     mariadb \
     mariadb-client \
     openssl \
+    git \
     && adduser -D -H -s /sbin/nologin appuser
 
 
