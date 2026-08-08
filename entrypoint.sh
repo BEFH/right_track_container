@@ -19,21 +19,25 @@ export PATH="$NODE_DIR/bin:$PATH"
 FIRST_RUN=0
 if [ ! -d "$MYSQL_DATA_DIR/mysql" ]; then
     FIRST_RUN=1
-    mkdir -p "$MYSQL_DATA_DIR" "$MYSQL_RUN_DIR"
-    echo "Initializing MariaDB data directory..."
-    mariadb-install-db \
-        --datadir="$MYSQL_DATA_DIR" \
-        --auth-root-authentication-method=normal \
-        --skip-test-db > /dev/null
 fi
 
-mkdir -p "$MYSQL_RUN_DIR"
-mariadbd \
-    --datadir="$MYSQL_DATA_DIR" \
-    --socket="$MYSQL_SOCKET" \
-    --pid-file="$MYSQL_RUN_DIR/mariadb.pid" \
+mkdir -p "$MYSQL_DATA_DIR" "$MYSQL_RUN_DIR"
+chown -R appuser:appuser "$MYSQL_DATA_DIR" "$MYSQL_RUN_DIR"
+
+if [ "$FIRST_RUN" -eq 1 ]; then
+    echo "Initializing MariaDB data directory..."
+    su -s /bin/sh appuser -c "mariadb-install-db \
+        --datadir='$MYSQL_DATA_DIR' \
+        --auth-root-authentication-method=normal \
+        --skip-test-db" > /dev/null
+fi
+
+su -s /bin/sh appuser -c "mariadbd \
+    --datadir='$MYSQL_DATA_DIR' \
+    --socket='$MYSQL_SOCKET' \
+    --pid-file='$MYSQL_RUN_DIR/mariadb.pid' \
     --bind-address=127.0.0.1 \
-    --port=3306 &
+    --port=3306" &
 MARIADB_PID=$!
 
 i=0
@@ -146,7 +150,12 @@ cleanup() {
 }
 trap cleanup INT TERM
 
+# Hand ownership of everything the Node process touches to appuser
+chown -R appuser:appuser "$DATA_DIR" 2>/dev/null || true
+# Re-lock credential/config files that must not be group/world readable
+chmod 600 "$ADMIN_CREDENTIALS_FILE" "$SERVER_CONFIG" 2>/dev/null || true
+
 echo "Starting Right Track API Server..."
-right-track-server "$SERVER_CONFIG" &
+su -s /bin/sh appuser -c "right-track-server '$SERVER_CONFIG'" &
 NODE_PID=$!
 wait "$NODE_PID"

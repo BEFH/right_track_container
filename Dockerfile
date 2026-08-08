@@ -10,7 +10,9 @@ RUN apk add --no-cache \
     libatomic \
     mariadb \
     mariadb-client \
-    openssl
+    openssl \
+    && adduser -D -H -s /sbin/nologin appuser
+
 
 WORKDIR /app
 
