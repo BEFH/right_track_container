@@ -1,6 +1,13 @@
 FROM bellsoft/alpaquita-linux-base:stream-glibc
 
-RUN apk add --no-cache curl tar xz bash libatomic
+RUN apk add --no-cache \
+    curl \
+    tar \
+    xz \
+    bash \
+    libgcc \
+    libstdc++ \
+    libatomic
 
 WORKDIR /app
 
