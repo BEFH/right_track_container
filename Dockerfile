@@ -6,7 +6,10 @@ RUN apk add --no-cache \
     tar \
     xz \
     gcompat \
-    bash
+    bash \
+    libgcc \
+    libstdc++ \
+    libatomic
 
 WORKDIR /app
 
