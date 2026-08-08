@@ -7,7 +7,7 @@ RUN apk add --no-cache \
     bash \
     libgcc \
     libstdc++ \
-    libatomic
+    libatomic \
     mariadb \
     mariadb-client \
     openssl
