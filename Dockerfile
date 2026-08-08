@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/wolfi-base
+FROM bellsoft/alpaquita-linux-base:stream-glibc
 
 RUN apk add --no-cache curl tar xz bash
 
