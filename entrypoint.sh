@@ -1,23 +1,82 @@
 #!/bin/sh
+set -e
 
 DATA_DIR="/data"
 NODE_DIR="$DATA_DIR/node"
+MYSQL_DATA_DIR="$DATA_DIR/mysql-data"
+MYSQL_RUN_DIR="$DATA_DIR/mysql-run"
+MYSQL_SOCKET="$MYSQL_RUN_DIR/mariadb.sock"
+ADMIN_CREDENTIALS_FILE="$DATA_DIR/.mysql_root_credentials"
+SERVER_CONFIG="$DATA_DIR/server.json"
+RT_API_SQL_URL="https://raw.githubusercontent.com/right-track/right-track-server/refs/heads/master/rt_api.sql"
 
-# Ensure appdata mount point exists and move into it
 mkdir -p "$DATA_DIR"
 cd "$DATA_DIR" || exit 1
 
-echo "=== Checking Local Installation in Appdata ==="
-
-# Prepend local node directory to PATH
 export PATH="$NODE_DIR/bin:$PATH"
 
-# Reusable function for downloading and installing Node.js
+# ---------- MariaDB first-run init ----------
+FIRST_RUN=0
+if [ ! -d "$MYSQL_DATA_DIR/mysql" ]; then
+    FIRST_RUN=1
+    mkdir -p "$MYSQL_DATA_DIR" "$MYSQL_RUN_DIR"
+    echo "Initializing MariaDB data directory..."
+    mariadb-install-db \
+        --datadir="$MYSQL_DATA_DIR" \
+        --auth-root-authentication-method=normal \
+        --skip-test-db > /dev/null
+fi
+
+mkdir -p "$MYSQL_RUN_DIR"
+mariadbd \
+    --datadir="$MYSQL_DATA_DIR" \
+    --socket="$MYSQL_SOCKET" \
+    --pid-file="$MYSQL_RUN_DIR/mariadb.pid" \
+    --bind-address=127.0.0.1 \
+    --port=3306 &
+MARIADB_PID=$!
+
+i=0
+while [ ! -S "$MYSQL_SOCKET" ] && [ "$i" -lt 30 ]; do
+    sleep 1
+    i=$((i + 1))
+done
+[ -S "$MYSQL_SOCKET" ] || { echo "MariaDB failed to start"; exit 1; }
+
+if [ "$FIRST_RUN" -eq 1 ]; then
+    echo "First run: creating root password, app user, and rt_api database..."
+
+    ROOT_PW=$(openssl rand -base64 32)
+    APP_PW=$(openssl rand -base64 32)
+
+    mariadb --socket="$MYSQL_SOCKET" -u root <<SQL
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${ROOT_PW}';
+CREATE DATABASE IF NOT EXISTS rt_api;
+CREATE USER IF NOT EXISTS 'rt_api'@'127.0.0.1' IDENTIFIED BY '${APP_PW}';
+GRANT ALL PRIVILEGES ON rt_api.* TO 'rt_api'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+
+    curl -fsSL "$RT_API_SQL_URL" -o "$DATA_DIR/rt_api.sql"
+    mariadb --socket="$MYSQL_SOCKET" -u root -p"$ROOT_PW" rt_api < "$DATA_DIR/rt_api.sql"
+    rm -f "$DATA_DIR/rt_api.sql"
+
+    umask 077
+    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$ROOT_PW" > "$ADMIN_CREDENTIALS_FILE"
+    chmod 600 "$ADMIN_CREDENTIALS_FILE"
+    unset ROOT_PW
+
+    APP_PW_GENERATED="$APP_PW"
+    unset APP_PW
+fi
+
+# ---------- Node install ----------
+echo "=== Checking Local Installation in Appdata ==="
+
 install_node() {
     TARBALL="node-${LATEST_VERSION}-linux-x64.tar.xz"
     URL="https://nodejs.org/dist/latest/$TARBALL"
     echo "Downloading $TARBALL..."
-
     curl -fsSL "$URL" -o "/tmp/$TARBALL"
     mkdir -p "$NODE_DIR"
     tar -xf "/tmp/$TARBALL" -C "$NODE_DIR" --strip-components=1
@@ -25,24 +84,17 @@ install_node() {
     echo "Node.js installed successfully: $(node -v)"
 }
 
-# Fetch latest version string from nodejs.org
 LATEST_VERSION=$(curl -s https://nodejs.org/dist/latest/ | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
 
-# 1. Check if Node.js is already installed locally in appdata
 if [ ! -x "$NODE_DIR/bin/node" ]; then
     echo "Node.js not found in appdata. Fetching latest version..."
-    if [ -z "$LATEST_VERSION" ]; then
-        echo "Error: Could not resolve the latest Node version and no local installation exists."
-        exit 1
-    fi
+    [ -z "$LATEST_VERSION" ] && { echo "Error: could not resolve latest Node version"; exit 1; }
     install_node
 else
     CURRENT_VERSION=$(node -v)
     echo "Existing Node.js installation found: $CURRENT_VERSION. Checking for updates..."
-
     if [ -n "$LATEST_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
         echo "Updating Node.js from $CURRENT_VERSION to $LATEST_VERSION..."
-        # Safely wipe old node directory without risking POSIX glob expansion errors
         rm -rf "$NODE_DIR"
         install_node
     else
@@ -50,7 +102,6 @@ else
     fi
 fi
 
-# 2. Ensure package.json exists in appdata
 if [ ! -f "package.json" ]; then
     cat <<EOF > package.json
 {
@@ -62,26 +113,40 @@ if [ ! -f "package.json" ]; then
 EOF
 fi
 
-# 3. Ensure Right Track packages are installed and up to date
 echo "Checking/Updating Right Track packages..."
-npm install right-track-server@latest right-track-agency-mnr@latest right-track-db-build@latest --no-fund --no-audit
+npm install -g right-track/right-track-server@latest \
+  right-track/right-track-agency-mnr@latest --no-fund --no-audit
 
-# 4. Build or update the GTFS database
-echo "Checking GTFS database status..."
-npx right-track-db-build --agency mnr
-
-# 5. Ensure server.json exists
-if [ ! -f "server.json" ]; then
-    cat <<EOF > server.json
+# ---------- server.json ----------
+if [ ! -f "$SERVER_CONFIG" ]; then
+    cat <<EOF > "$SERVER_CONFIG"
 {
-  "port": 8080,
-  "agencies": [
-    "right-track-agency-mnr"
-  ]
+    "database": {
+        "host": "127.0.0.1",
+        "username": "rt_api",
+        "password": "${APP_PW_GENERATED}"
+    },
+    "agencies": [
+        {
+            "require": "right-track-agency-mnr"
+        }
+    ]
 }
 EOF
+    chmod 600 "$SERVER_CONFIG"
 fi
+unset APP_PW_GENERATED
 
-# 6. Start the API Server
+# ---------- Shutdown handling ----------
+cleanup() {
+    echo "Shutting down..."
+    ADMIN_PW=$(grep MYSQL_ROOT_PASSWORD "$ADMIN_CREDENTIALS_FILE" | cut -d= -f2-)
+    mariadb-admin --socket="$MYSQL_SOCKET" -u root -p"$ADMIN_PW" shutdown 2>/dev/null || true
+    exit 0
+}
+trap cleanup INT TERM
+
 echo "Starting Right Track API Server..."
-exec npx right-track-server "$DATA_DIR/server.json"
+right-track-server "$SERVER_CONFIG" &
+NODE_PID=$!
+wait "$NODE_PID"
