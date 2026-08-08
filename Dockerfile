@@ -1,15 +1,6 @@
-FROM alpine:latest
+FROM cgr.dev/chainguard/wolfi-base
 
-# Install minimal runtime dependencies required for Node and tarballs
-RUN apk add --no-cache \
-    curl \
-    tar \
-    xz \
-    gcompat \
-    bash \
-    libgcc \
-    libstdc++ \
-    libatomic
+RUN apk add --no-cache curl tar xz bash
 
 WORKDIR /app
 
