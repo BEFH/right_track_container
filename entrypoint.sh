@@ -106,20 +106,9 @@ else
     fi
 fi
 
-if [ ! -f "package.json" ]; then
-    cat <<EOF > package.json
-{
-  "name": "right-track-mnr-data",
-  "version": "1.0.0",
-  "private": true,
-  "dependencies": {}
-}
-EOF
-fi
-
 echo "Checking/Updating Right Track packages..."
-npm install -g right-track/right-track-server@latest \
-  right-track/right-track-agency-mnr@latest --no-fund --no-audit
+npm install -g right-track/right-track-server \
+  right-track/right-track-agency-mnr --no-fund --no-audit
 
 # ---------- server.json ----------
 if [ ! -f "$SERVER_CONFIG" ]; then
