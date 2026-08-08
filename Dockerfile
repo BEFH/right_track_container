@@ -19,6 +19,7 @@ WORKDIR /app
 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+RUN git config --global url."https://github.com/".insteadOf git://github.com/
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
