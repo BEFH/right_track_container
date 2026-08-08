@@ -74,12 +74,14 @@ SQL
     unset APP_PW
 fi
 
-# ---------- Node install ----------
+# ---------- Node install (pinned) ----------
 echo "=== Checking Local Installation in Appdata ==="
 
+NODE_VERSION="v10.24.1"
+
 install_node() {
-    TARBALL="node-${LATEST_VERSION}-linux-x64.tar.xz"
-    URL="https://nodejs.org/dist/latest/$TARBALL"
+    TARBALL="node-${NODE_VERSION}-linux-x64.tar.xz"
+    URL="https://nodejs.org/dist/${NODE_VERSION}/$TARBALL"
     echo "Downloading $TARBALL..."
     curl -fsSL "$URL" -o "/tmp/$TARBALL"
     mkdir -p "$NODE_DIR"
@@ -88,21 +90,17 @@ install_node() {
     echo "Node.js installed successfully: $(node -v)"
 }
 
-LATEST_VERSION=$(curl -s https://nodejs.org/dist/latest/ | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-
 if [ ! -x "$NODE_DIR/bin/node" ]; then
-    echo "Node.js not found in appdata. Fetching latest version..."
-    [ -z "$LATEST_VERSION" ] && { echo "Error: could not resolve latest Node version"; exit 1; }
+    echo "Node.js not found in appdata. Installing pinned version $NODE_VERSION..."
     install_node
 else
     CURRENT_VERSION=$(node -v)
-    echo "Existing Node.js installation found: $CURRENT_VERSION. Checking for updates..."
-    if [ -n "$LATEST_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST_VERSION" ]; then
-        echo "Updating Node.js from $CURRENT_VERSION to $LATEST_VERSION..."
+    if [ "$CURRENT_VERSION" != "$NODE_VERSION" ]; then
+        echo "Replacing Node.js $CURRENT_VERSION with pinned version $NODE_VERSION..."
         rm -rf "$NODE_DIR"
         install_node
     else
-        echo "Node.js is already up to date ($CURRENT_VERSION)."
+        echo "Node.js is already at pinned version ($CURRENT_VERSION)."
     fi
 fi
 
